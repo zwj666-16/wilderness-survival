@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#15251d">
+<title>荒野生存 · 原型 0.1</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#9ac6d2;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;touch-action:none}
+#game{position:fixed;inset:0}canvas{display:block;width:100%;height:100%}
+#hud{position:fixed;top:env(safe-area-inset-top,10px);left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;pointer-events:none;color:#fff;text-shadow:0 2px 4px #17251c;font-weight:700}
+.panel{background:#14251dcc;border:1px solid #ffffff44;border-radius:12px;padding:9px 11px;backdrop-filter:blur(5px);font-size:13px}
+#stats{line-height:1.7}#hint{max-width:48%;text-align:right;line-height:1.5}
+#controls{position:fixed;inset:auto 0 max(18px,env(safe-area-inset-bottom)) 0;display:flex;justify-content:space-between;align-items:end;padding:0 18px;pointer-events:none}
+#stick{width:126px;height:126px;border-radius:50%;background:#15251d55;border:2px solid #ffffff88;position:relative;pointer-events:auto;touch-action:none}
+#knob{position:absolute;width:52px;height:52px;border-radius:50%;background:#f5f2d9cc;border:2px solid #fff;left:35px;top:35px}
+#actions{display:flex;flex-direction:column;align-items:end;gap:10px;pointer-events:auto}
+button{border:1px solid #ffffff99;color:white;background:#183a2bdb;border-radius:15px;font-size:14px;font-weight:700;padding:13px 16px;box-shadow:0 3px 0 #0b2017;touch-action:manipulation}
+button:active{transform:translateY(2px);box-shadow:0 1px 0 #0b2017}
+#toast{position:fixed;left:50%;top:22%;transform:translateX(-50%);background:#13251ddd;color:white;padding:12px 16px;border-radius:12px;opacity:0;transition:opacity .2s;pointer-events:none;text-align:center;max-width:85%;font-size:14px}
+#start{position:fixed;inset:0;background:#10251dcc;color:white;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px}
+#start .card{max-width:380px;background:#173427f2;border:1px solid #ffffff44;border-radius:20px;padding:24px;box-shadow:0 16px 60px #0006}
+#start h1{font-size:27px;margin:0 0 8px}#start p{line-height:1.6;color:#e3eadc;font-size:14px}
+#start button{font-size:16px;padding:14px 22px}
+@media (min-width:700px){#controls{padding:0 34px 20px}#stick{width:140px;height:140px}#knob{left:42px;top:42px}}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="hud">
+ <div class="panel" id="stats">🌿 荒野生存 · 原型 0.1<br>❤️ 生命：100<br>🪵 木材：0　🪨 石头：0</div>
+ <div class="panel" id="hint">拖动左侧摇杆移动<br>靠近树木或石块后点击采集</div>
+</div>
+<div id="controls">
+ <div id="stick"><div id="knob"></div></div>
+ <div id="actions"><button id="collect">采集资源</button><button id="reset">重新开始</button></div>
+</div>
+<div id="toast"></div>
+<div id="start"><div class="card">
+<h1>🌲 荒野生存</h1>
+<p>这是第一版 3D 手机原型。探索小岛，靠近树木或石块并采集资源。<br>用左侧摇杆移动，右侧按钮采集。建议在 Safari 中打开并保持网络连接以加载 3D 引擎。</p>
+<button id="play">进入荒野</button>
+</div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+const start = document.getElementById('start'), toastEl=document.getElementById('toast'), stats=document.getElementById('stats'), knob=document.getElementById('knob');
+let scene,camera,renderer,player,world=[],resources=[],wood=0,stone=0,health=100,started=false,toastTimer;
+const input={x:0,z:0}, keys={};
+function toast(t){toastEl.textContent=t;toastEl.style.opacity=1;clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastEl.style.opacity=0,1500)}
+function updateHUD(){stats.innerHTML=`🌿 荒野生存 · 原型 0.1<br>❤️ 生命：${health}<br>🪵 木材：${wood}　🪨 石头：${stone}`}
+function mat(color,rough=.9){return new THREE.MeshStandardMaterial({color,roughness:rough})}
+function addMesh(geo,material,x,y,z,group=scene){const m=new THREE.Mesh(geo,material);m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;group.add(m);return m}
+function makeTree(x,z){
+ const g=new THREE.Group();g.position.set(x,0,z);scene.add(g);
+ addMesh(new THREE.CylinderGeometry(.22,.34,1.8,7),mat(0x795238),0,.9,0,g);
+ addMesh(new THREE.ConeGeometry(1.0,2.0,7),mat(0x286345),0,2.2,0,g);
+ addMesh(new THREE.ConeGeometry(.75,1.6,7),mat(0x36764b),0,3.0,0,g);
+ resources.push({type:'wood',mesh:g,x,z,active:true});world.push(g);
+}
+function makeRock(x,z){
+ const g=new THREE.Group();g.position.set(x,0,z);scene.add(g);
+ const r=addMesh(new THREE.DodecahedronGeometry(.65,0),mat(0x7f8885),0,.45,0,g);r.scale.set(1.2,.8,1);
+ resources.push({type:'stone',mesh:g,x,z,active:true});world.push(g);
+}
+function init(){
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x9ccbd8);scene.fog=new THREE.Fog(0x9ccbd8,25,75);
+ camera=new THREE.PerspectiveCamera(62,innerWidth/innerHeight,.1,150);
+ renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio,1.6));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;document.getElementById('game').appendChild(renderer.domElement);
+ scene.add(new THREE.HemisphereLight(0xdff4ff,0x526044,2.0));
+ const sun=new THREE.DirectionalLight(0xfff2d1,2.2);sun.position.set(-12,25,10);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);scene.add(sun);
+ addMesh(new THREE.PlaneGeometry(140,140),mat(0x5e9a57),0,-.12,0).rotation.x=-Math.PI/2;
+ // sandy shoreline and simple water edge
+ const water=addMesh(new THREE.PlaneGeometry(180,180),mat(0x4e9eb0,.55),0,-.28,0);water.rotation.x=-Math.PI/2;
+ const island=addMesh(new THREE.CylinderGeometry(35,39,.6,48),mat(0x6ba65d),0,-.02,0);island.scale.y=.35;
+ // grass patches
+ for(let i=0;i<180;i++){let x=(Math.random()-.5)*65,z=(Math.random()-.5)*65;if(x*x+z*z<1050){const b=addMesh(new THREE.ConeGeometry(.07,.35,3),mat(i%2?0x79b65f:0x4d8948),x,.12,z);b.rotation.z=(Math.random()-.5)*.5;}}
+ for(let i=0;i<32;i++){let a=Math.random()*Math.PI*2,r=6+Math.random()*25;makeTree(Math.cos(a)*r,Math.sin(a)*r)}
+ for(let i=0;i<17;i++){let a=Math.random()*Math.PI*2,r=4+Math.random()*27;makeRock(Math.cos(a)*r,Math.sin(a)*r)}
+ player=new THREE.Group();scene.add(player);
+ const body=addMesh(new THREE.CapsuleGeometry(.38,.8,4,8),mat(0x315f9a),0,1,0,player);
+ const head=addMesh(new THREE.SphereGeometry(.28,12,10),mat(0xe7bc91),0,1.72,0,player);
+ const pack=addMesh(new THREE.BoxGeometry(.38,.48,.2),mat(0x60432b),0,1.12,-.34,player);
+ player.position.set(0,0,0);
+ camera.position.set(0,6,9);camera.lookAt(0,1,0);
+ addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+ animate();
+}
+function gather(){
+ let best=null,dist=999;
+ for(const r of resources){if(!r.active)continue;const d=Math.hypot(player.position.x-r.x,player.position.z-r.z);if(d<dist){dist=d;best=r}}
+ if(best&&dist<3.4){best.active=false;best.mesh.visible=false;if(best.type==='wood')wood+=2;else stone+=1;updateHUD();toast(best.type==='wood'?'采集成功：木材 +2':'采集成功：石头 +1')}
+ else toast('再靠近一些资源！');
+}
+function animate(){
+ requestAnimationFrame(animate);
+ if(started&&player){
+  let dx=input.x, dz=input.z;
+  if(keys.ArrowLeft||keys.a)dx-=1;if(keys.ArrowRight||keys.d)dx+=1;if(keys.ArrowUp||keys.w)dz-=1;if(keys.ArrowDown||keys.s)dz+=1;
+  const len=Math.hypot(dx,dz);if(len>1){dx/=len;dz/=len}
+  player.position.x+=dx*.105;player.position.z+=dz*.105;
+  const r=Math.hypot(player.position.x,player.position.z);if(r>31){player.position.x*=31/r;player.position.z*=31/r}
+  if(Math.abs(dx)+Math.abs(dz)>.01)player.rotation.y=Math.atan2(dx,dz);
+  const target=new THREE.Vector3(player.position.x,player.position.y+1,player.position.z);
+  const desired=new THREE.Vector3(player.position.x,player.position.y+5.2,player.position.z+7.4);
+  camera.position.lerp(desired,.09);camera.lookAt(target);
+ }
+ renderer.render(scene,camera);
+}
+const stick=document.getElementById('stick');
+let pointer=null,center={x:0,y:0};
+function stickMove(e){if(pointer===null)return;const dx=e.clientX-center.x,dy=e.clientY-center.y,max=42;const x=Math.max(-max,Math.min(max,dx)),y=Math.max(-max,Math.min(max,dy));knob.style.transform=`translate(${x}px,${y}px)`;input.x=x/max;input.z=y/max}
+stick.addEventListener('pointerdown',e=>{pointer=e.pointerId;const b=stick.getBoundingClientRect();center={x:b.left+b.width/2,y:b.top+b.height/2};stick.setPointerCapture(pointer);stickMove(e)});
+stick.addEventListener('pointermove',stickMove);
+function endStick(){pointer=null;input.x=input.z=0;knob.style.transform='translate(0,0)'}
+stick.addEventListener('pointerup',endStick);stick.addEventListener('pointercancel',endStick);
+document.getElementById('collect').addEventListener('click',gather);
+document.getElementById('reset').addEventListener('click',()=>{wood=stone=0;health=100;resources.forEach(r=>{r.active=true;r.mesh.visible=true});player.position.set(0,0,0);updateHUD();toast('已重置营地')});
+document.getElementById('play').addEventListener('click',()=>{if(!window.THREE){toast('3D 引擎加载失败，请检查网络后刷新');return}start.style.display='none';started=true});
+addEventListener('keydown',e=>keys[e.key]=true);addEventListener('keyup',e=>keys[e.key]=false);
+if(window.THREE)init();else {document.querySelector('#start p').innerHTML+='（若画面一直无法进入，请刷新页面并确认网络可访问 CDN。）'}
+})();
+</script>
+</body>
+</html>
